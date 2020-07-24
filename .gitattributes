@@ -1,0 +1,2 @@
+*.wav filter=lfs diff=lfs merge=lfs -text
+**/adpcm_reference.json filter=lfs diff=lfs merge=lfs -text

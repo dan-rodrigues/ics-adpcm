@@ -1,0 +1,21 @@
+# Verilator
+
+/obj_dir
+
+# GTKW
+/*.gtkw
+
+# Tests
+
+/reference.wav
+/adpcm_reference.json
+/dsp.vcd
+
+# Xcode
+
+/*.xcodeproj
+
+# MacOS
+
+.DS_Store
+

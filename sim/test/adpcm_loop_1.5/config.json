@@ -1,0 +1,5 @@
+{
+    "sample_path": "samples/sin-xq.adpcm",
+    "test_duration": 10000000,
+	"sample_count": 6123
+}

@@ -1,0 +1,20 @@
+[
+    {
+        "flags": 2,
+        "pitch": 4096,
+        "sample_end_address": 2048,
+        "sample_loop_address": 0,
+        "sample_start_address": 0,
+        "volume_left": 80,
+        "volume_right": 80
+    },
+    {
+        "flags": 2,
+        "pitch": 4096,
+        "sample_end_address": 2048,
+        "sample_loop_address": 0,
+        "sample_start_address": 0,
+        "volume_left": 80,
+        "volume_right": 80
+    }
+]

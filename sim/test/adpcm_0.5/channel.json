@@ -1,0 +1,11 @@
+[
+    {
+        "flags": 2,
+        "pitch": 2048,
+        "sample_end_address": 49152,
+        "sample_loop_address": 0,
+        "sample_start_address": 0,
+        "volume_left": 127,
+        "volume_right": 127
+    }
+]

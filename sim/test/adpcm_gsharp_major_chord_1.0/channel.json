@@ -1,0 +1,29 @@
+[
+    {
+        "flags": 2,
+        "pitch": 4096,
+        "sample_end_address": 49152,
+        "sample_loop_address": 0,
+        "sample_start_address": 0,
+        "volume_left": 64,
+        "volume_right": 64
+    },
+    {
+        "flags": 2,
+        "pitch": 5161,
+        "sample_end_address": 49152,
+        "sample_loop_address": 0,
+        "sample_start_address": 0,
+        "volume_left": 64,
+        "volume_right": 64
+    },
+    {
+        "flags": 2,
+        "pitch": 6137,
+        "sample_end_address": 49152,
+        "sample_loop_address": 0,
+        "sample_start_address": 0,
+        "volume_left": 64,
+        "volume_right": 64
+    }
+]

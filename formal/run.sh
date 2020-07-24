@@ -1,4 +1,4 @@
 #!/bin/sh
 
-sby adpcm_dsp -f
+sby ics_adpcm.sby -f
 

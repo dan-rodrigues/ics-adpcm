@@ -1,0 +1,18 @@
+[options]
+mode bmc
+depth 34
+
+[engines]
+smtbmc boolector
+
+[script]
+read -formal ics_adpcm.v
+hierarchy -top ics_adpcm
+chparam -set CLOCK_DIVISOR 32 ics_adpcm
+chparam -set CHANNELS 8 ics_adpcm
+prep -top ics_adpcm
+
+[files]
+../ics_adpcm.v
+../adpcm_step_lut.hex
+

@@ -452,26 +452,24 @@ module ics_adpcm #(
     reg [36:0] pcm_target_index;
     reg pcm_target_index_16_preadd;
 
-    // *bottom 12 bits are not used*
-    reg [36:0] pcm_stepping_index;
-
-    // Target address is reach when "PCM index select" matchess
+    // Target address is reached when stepping index catches up to the target
     reg pcm_target_address_reached;
 
-    // Output address is doubled as samples being indexes are 16bits
+    // *bottom 12 bits are not used*
+    reg [36:0] pcm_stepping_index;
     assign pcm_read_address = {pcm_stepping_index[36:14], 1'b0};
 
-    reg adpcm_block_ended;
     wire block_starting = gb_ch_start_current || adpcm_block_ended;
 
     reg [13:0] end_block, loop_block;
     reg end_block_reached;
+    reg adpcm_block_ended;
 
     // Register anything involving big comparators to aid timing
 
     always @(posedge clk) begin
         pcm_target_address_reached <= pcm_stepping_index[36:12] == pcm_target_index[36:12];
-        end_block_reached <= (end_block == pcm_stepping_index[36:ADPCM_BLOCK_WIDTH + 12 + 1]);        
+        end_block_reached <= (end_block == pcm_stepping_index[36:ADPCM_BLOCK_WIDTH + 12 + 1]);
         adpcm_block_ended <= pcm_stepping_index[ADPCM_BLOCK_WIDTH + 12: 12] == 0;
     end
 

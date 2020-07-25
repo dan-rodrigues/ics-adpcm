@@ -376,7 +376,7 @@ module ics_adpcm #(
     always @* begin
         case (state)
             STATE_ADPCM_COMPUTE_DIFF, STATE_READ_WAIT, STATE_ADPCM_PREPARE_COMPUTE_DIFF,
-            STATE_ADPCM_COMPLETE_STEP:
+            STATE_ADPCM_COMPLETE_STEP, STATE_ADPCM_STORE_DIFF:
                 adpcm_needs_step_lut = 1;
             default:
                 adpcm_needs_step_lut = 0;
@@ -416,7 +416,7 @@ module ics_adpcm #(
         STATE_CH_VOLUME = 5,
         STATE_CH_LOOP = 6,
         STATE_CH_COMPLETE = 7,
-        // (vacant)
+        STATE_ADPCM_STORE_DIFF = 8,
         STATE_OUTPUT_WAIT = 9,
         STATE_ADPCM_WAIT_INIT_PREDICTOR = 13,
         STATE_ADPCM_WAIT_INIT_INDEX = 14,
@@ -452,20 +452,26 @@ module ics_adpcm #(
     reg [36:0] pcm_target_index;
     reg pcm_target_index_16_preadd;
 
+    // Target address is reached when stepping index catches up to the target
+    reg pcm_target_address_reached;
+
     // *bottom 12 bits are not used*
     reg [36:0] pcm_stepping_index;
-
-    // Target address is reach when "PCM index select" matchess
-    wire pcm_target_address_reached = pcm_stepping_index[36:12] == pcm_target_index[36:12];
-
-    // Output address is doubled as samples being indexes are 16bits
     assign pcm_read_address = {pcm_stepping_index[36:14], 1'b0};
 
-    wire adpcm_block_ended = pcm_stepping_index[ADPCM_BLOCK_WIDTH + 12: 12] == 0;
     wire block_starting = gb_ch_start_current || adpcm_block_ended;
 
     reg [13:0] end_block, loop_block;
-    wire end_block_reached = (end_block == pcm_stepping_index[36:ADPCM_BLOCK_WIDTH + 12 + 1]);
+    reg end_block_reached;
+    reg adpcm_block_ended;
+
+    // Register anything involving big comparators to aid timing
+
+    always @(posedge clk) begin
+        pcm_target_address_reached <= pcm_stepping_index[36:12] == pcm_target_index[36:12];
+        end_block_reached <= (end_block == pcm_stepping_index[36:ADPCM_BLOCK_WIDTH + 12 + 1]);
+        adpcm_block_ended <= pcm_stepping_index[ADPCM_BLOCK_WIDTH + 12: 12] == 0;
+    end
 
     // --- PCM data registering ---
 
@@ -762,12 +768,15 @@ module ics_adpcm #(
                     pcm_stepping_index[36:12] <= pcm_stepping_index[36:12] + 1;
                     pcm_stepping_index_previous_word <= pcm_stepping_index[16:14];
 
-                    state <= STATE_ADPCM_COMPLETE_STEP;
+                    state <= STATE_ADPCM_STORE_DIFF;
                 end
             end
-            STATE_ADPCM_COMPLETE_STEP: begin
+            STATE_ADPCM_STORE_DIFF: begin
                 adpcm_predictor <= adpcm_predictor_nx;
 
+                state <= STATE_ADPCM_COMPLETE_STEP;
+            end
+            STATE_ADPCM_COMPLETE_STEP: begin
                 // Clip step index if it is out of bounds
                 if (adpcm_step_index_needs_clipping) begin
                     adpcm_step_index <= p_reg_read_data[6:0];

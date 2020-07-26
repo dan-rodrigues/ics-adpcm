@@ -85,6 +85,8 @@ module ics_adpcm #(
     // Final truncation of the output happens here
     // When mixing all the channels, the lower 7 fraction bits are preserved to help with accuracy
 
+    wire acc_start = state_changed_to(STATE_CH_VOLUME);
+
     assign output_l = gb_level_l[22:7];
     assign output_r = gb_level_r[22:7];
 
@@ -94,8 +96,7 @@ module ics_adpcm #(
     wire acc_complete = acc_add_right;
 
     always @(posedge clk) begin
-        // acc_add_left <= (state == STATE_CH_VOLUME && state_changed);
-        acc_add_left <= state_changed_to(STATE_CH_VOLUME);
+        acc_add_left <= acc_start;
         acc_add_right <= 0;
 
         if (output_valid) begin
@@ -113,11 +114,8 @@ module ics_adpcm #(
 
     // It's expected that REG_VOLUME data is available by the time this is used
 
-    // wire mac_mult_left = state_changed;
-    wire mac_mult_left = state_changed_to(STATE_CH_VOLUME);
-
     always @(posedge clk) begin
-        if (mac_mult_left) begin
+        if (acc_start) begin
             mult_volume <= reg_read_data[7:0];
             mac_add <= gb_level_l;
         end else begin
@@ -194,7 +192,7 @@ module ics_adpcm #(
 
     // Channel trigger shift register copy for FSM
 
-    wire ch_complete = state == STATE_CH_COMPLETE;
+    wire ch_complete = (state == STATE_CH_COMPLETE);
 
     reg [CHANNEL_MSB:0] gb_ch_start_shift, gb_ch_stop_shift;
     wire gb_ch_start_current = gb_ch_start_shift[0];
@@ -335,7 +333,6 @@ module ics_adpcm #(
 
     reg p_regs_writing;
     reg p_regs_write_complete;
-    // wire p_regs_start_writing = (state == STATE_CH_VOLUME && state_changed);
     wire p_regs_start_writing = state_changed_to(STATE_CH_VOLUME);
 
     wire [2:0] p_regs_index_writing_offset = p_regs_write_index + 1;
@@ -429,35 +426,19 @@ module ics_adpcm #(
         STATE_ADPCM_COMPLETE_STEP = 10;
 
     reg [3:0] ch;
-
-    // OLD:
-
     reg [3:0] state;
 
-    reg [3:0] state_previous;
-    wire state_changed = state_previous != state;
-
-    always @(posedge clk) begin
-        state_previous <= state;
-    end
-
-    // NEW:
-
-    integer state_index;
-
+    // One-hot friendly state change tracking
+    // This shouldn't prevent yosys from extracting the FSM
+    
     reg [15:0] state_previous_mask;
 
+    integer state_index;
     always @(posedge clk) begin
         for (state_index = 0; state_index < 16; state_index = state_index + 1) begin
-            state_previous_mask[state_index] <= (state == state_index);
+            state_previous_mask[state_index[3:0]] <= (state == state_index[3:0]);
         end
     end
-
-    function [0:0] state_changed_to;
-        input [3:0] new_state;
-
-        state_changed_to = !state_previous_mask[new_state] && (state == new_state);
-    endfunction
 
     // ---
 
@@ -735,7 +716,6 @@ module ics_adpcm #(
                         pcm_address_valid <= 0;
                         // No step? Skip straight to volume output
                         // !state_changed is required because an extra cycle is needed for the register read
-                        // if (!state_changed) begin
                         if (!state_changed_to(STATE_CTRL_DONE)) begin
                             state <= STATE_CH_VOLUME;
                         end
@@ -913,6 +893,12 @@ module ics_adpcm #(
         input [2:0] index;
 
         output_reg_offset = ((index - REG_READ_LATENCY) & 3'b111);
+    endfunction
+
+    function [0:0] state_changed_to;
+        input [3:0] new_state;
+
+        state_changed_to = !state_previous_mask[new_state] && (state == new_state);
     endfunction
 
 `ifdef FORMAL

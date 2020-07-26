@@ -94,7 +94,8 @@ module ics_adpcm #(
     wire acc_complete = acc_add_right;
 
     always @(posedge clk) begin
-        acc_add_left <= (state == STATE_CH_VOLUME && state_changed);
+        // acc_add_left <= (state == STATE_CH_VOLUME && state_changed);
+        acc_add_left <= state_changed_to(STATE_CH_VOLUME);
         acc_add_right <= 0;
 
         if (output_valid) begin
@@ -112,7 +113,8 @@ module ics_adpcm #(
 
     // It's expected that REG_VOLUME data is available by the time this is used
 
-    wire mac_mult_left = state_changed;
+    // wire mac_mult_left = state_changed;
+    wire mac_mult_left = state_changed_to(STATE_CH_VOLUME);
 
     always @(posedge clk) begin
         if (mac_mult_left) begin
@@ -333,7 +335,8 @@ module ics_adpcm #(
 
     reg p_regs_writing;
     reg p_regs_write_complete;
-    wire p_regs_start_writing = (state == STATE_CH_VOLUME && state_changed);
+    // wire p_regs_start_writing = (state == STATE_CH_VOLUME && state_changed);
+    wire p_regs_start_writing = state_changed_to(STATE_CH_VOLUME);
 
     wire [2:0] p_regs_index_writing_offset = p_regs_write_index + 1;
 
@@ -426,6 +429,9 @@ module ics_adpcm #(
         STATE_ADPCM_COMPLETE_STEP = 10;
 
     reg [3:0] ch;
+
+    // OLD:
+
     reg [3:0] state;
 
     reg [3:0] state_previous;
@@ -434,6 +440,26 @@ module ics_adpcm #(
     always @(posedge clk) begin
         state_previous <= state;
     end
+
+    // NEW:
+
+    integer state_index;
+
+    reg [15:0] state_previous_mask;
+
+    always @(posedge clk) begin
+        for (state_index = 0; state_index < 16; state_index = state_index + 1) begin
+            state_previous_mask[state_index] <= (state == state_index);
+        end
+    end
+
+    function [0:0] state_changed_to;
+        input [3:0] new_state;
+
+        state_changed_to = !state_previous_mask[new_state] && (state == new_state);
+    endfunction
+
+    // ---
 
     reg [0:0] ch_ctrl_p;
 
@@ -709,7 +735,8 @@ module ics_adpcm #(
                         pcm_address_valid <= 0;
                         // No step? Skip straight to volume output
                         // !state_changed is required because an extra cycle is needed for the register read
-                        if (!state_changed) begin
+                        // if (!state_changed) begin
+                        if (!state_changed_to(STATE_CTRL_DONE)) begin
                             state <= STATE_CH_VOLUME;
                         end
                     end else begin
@@ -738,7 +765,7 @@ module ics_adpcm #(
 
                 adpcm_step_index <= pcm_read_data_r[6:0];
                 
-                if (pcm_data_ready_r && !state_changed) begin
+                if (pcm_data_ready_r && !state_changed_to(STATE_ADPCM_WAIT_INIT_INDEX)) begin
                     pcm_stepping_index[15:14] <= 2'b10;
                     pcm_target_index[36:14] <= pcm_target_index[36:14] + 1;
 
@@ -750,7 +777,7 @@ module ics_adpcm #(
             STATE_READ_WAIT: begin
                 pcm_address_valid <= 1;
 
-                if (pcm_data_ready_r && !state_changed) begin
+                if (pcm_data_ready_r && !state_changed_to(STATE_READ_WAIT)) begin
                     pcm_address_valid <= 0;
                     state <= STATE_ADPCM_PREPARE_COMPUTE_DIFF;
                 end

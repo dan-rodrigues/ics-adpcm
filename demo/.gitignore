@@ -1,0 +1,9 @@
+# yosys / nextpnr
+
+/*.asc
+/*.bit
+/*.json
+
+/*.svf
+/*.config
+

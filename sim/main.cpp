@@ -10,7 +10,7 @@
 
 #include "tinywav.hpp"
 #include "json.hpp"
-#include "DSPControl.hpp"
+#include "Control.hpp"
 #include "Serialization.hpp"
 #include "TestConfig.hpp"
 
@@ -182,8 +182,8 @@ int main(int argc, const char * argv[]) {
     }
 
     tb->reset = 1;
-    tb->host_write_en = 0;
-    tb->host_read_en = 0;
+    tb->ch_write_en = 0;
+    tb->gb_write_en = 0;
     tb->clk = 0;
     tb->eval();
 
@@ -214,16 +214,15 @@ int main(int argc, const char * argv[]) {
 #endif
         main_time++;
 
-        // Handle writes / reads on the negedge
-        handle_pending_writes();
-        handle_pcm_read();
-
         tb->clk = 0;
         tb->eval();
 #if VM_TRACE
         tfp->dump(main_time);
 #endif
         main_time++;
+
+        handle_pending_writes();
+        handle_pcm_read();
 
         capture_debug_outputs();
 
@@ -299,23 +298,45 @@ void queue_write(uint16_t address, uint16_t data) {
 // Perform 1 write per cycle, if needed
 
 void handle_pending_writes() {
-    if (tb->host_write_en && !tb->host_ready) {
+    if (tb->gb_write_en && !tb->gb_write_ready) {
         return;
     }
 
-    tb->host_write_en = 0;
+    tb->gb_write_en = 0;
+
+    if (tb->ch_write_en && !tb->ch_write_ready) {
+        return;
+    }
+
+    // Deassert write enable and wait to next cycle if needed
+    if (tb->ch_write_en) {
+        tb->ch_write_en = 0;
+        return;
+    }
 
     if (dsp_write_queue.empty()) {
         return;
     }
-
+    
     auto pending_write = dsp_write_queue.front();
-    dsp_write_queue.pop_front();
 
-    tb->host_write_en = 1;
-    tb->host_address = pending_write.address;
-    tb->host_write_data = pending_write.data;
-    tb->host_write_byte_mask = 0x03;
+    if (pending_write.address & 0x100) {
+        if (tb->gb_write_busy) {
+            // Wait until any pending channel state is processed
+            return;
+        }
+
+        tb->gb_write_en = 1;
+        tb->gb_write_data = pending_write.data;
+        tb->gb_write_address = pending_write.address & 0x01;
+    } else {
+        tb->ch_write_en = 1;
+        tb->ch_write_address = pending_write.address;
+        tb->ch_write_data = pending_write.data;
+        tb->ch_write_byte_mask = 0x03;
+    }
+
+    dsp_write_queue.pop_front();
 }
 
 void handle_pcm_read() {
@@ -329,12 +350,6 @@ void handle_pcm_read() {
 
     uint32_t address = tb->pcm_read_address;
 
-    if (address & 0x01) {
-        std::cerr << "Expected only even address (16bit accesses)" << std::endl;
-        return;
-    }
-
-    address /= 2;
     if (address >= pcm_memory.size()) {
         std::cerr << "Attempted out of bounds PCM read" << std::endl;
         return;
@@ -411,11 +426,11 @@ bool assert_debug_adpcm_matches(const std::string &referencePath) {
     std::ifstream stream;
     stream.exceptions(std::ios::failbit);
     stream.open(referencePath, std::ios::in);
-    json refrence_json;
-    stream >> refrence_json;
+    json reference_json;
+    stream >> reference_json;
     stream.close();
 
-    auto reference_captures = refrence_json["adpcm_capture"].get<std::vector<DebugADPCM>>();
+    auto reference_captures = reference_json["adpcm_capture"].get<std::vector<DebugADPCM>>();
 
     if (reference_captures.size() != debug_adpcm_capture.size()) {
         std::cout << "Warning: ADPCM debug capture is not equally sized to reference" << "\n";
@@ -479,6 +494,7 @@ bool assert_wav_reference_matches(const std::string &referencePath) {
         if (reference_samples[i] != wav_capture[i]) {
             std::cerr << "Reference WAV mismatch at: " << i << " ";
             std::cerr << "(stereo sample: " << i / 2 << ")" << std::endl;
+            std::cerr << "Expected: " << reference_samples[i] << ", got: " << wav_capture[i] << std::endl;
             return false;
         }
     }
@@ -489,5 +505,5 @@ bool assert_wav_reference_matches(const std::string &referencePath) {
 }
 
 bool channels_did_end(uint8_t channel_mask) {
-    return (tb->host_read_data & channel_mask) == channel_mask;
+    return (tb->gb_ended & channel_mask) == channel_mask;
 }

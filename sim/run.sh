@@ -2,8 +2,7 @@
 
 set -e
 
-./build-sim.sh
-#./build-tracing-sim.sh
+./build.sh
 
 for d in test/*/; do
 	echo "Running tests for directory ${d}..."

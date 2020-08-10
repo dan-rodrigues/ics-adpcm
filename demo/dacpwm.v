@@ -1,3 +1,6 @@
+// This module is originally from this repo:
+// https://github.com/emard/ulx3s-misc/tree/master/examples/audio/hdl
+
 // combines resistor DAC and PWM
 // upper bits using DAC, lower bit using PWM
 

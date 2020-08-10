@@ -460,7 +460,7 @@ module adpcm_demo_top #(
     wire gb_write_ready;
 
     ics_adpcm #(
-        .CLOCK_DIVISOR(50000000 / 44100),
+        .OUTPUT_INTERVAL(50000000 / 44100),
         .CHANNELS(3)
     ) adpcm (
         .clk(clk),

@@ -7,7 +7,7 @@
 `default_nettype none
 
 module ics_adpcm #(
-    parameter integer CLOCK_DIVISOR = 33700000 / 44100,
+    parameter integer OUTPUT_INTERVAL = 33700000 / 44100,
     parameter [15:0] ADPCM_BLOCK_SIZE = 1024 * 2,
     parameter [3:0] CHANNELS = 8,
     parameter ADPCM_STEP_LUT_PATH = "adpcm_step_lut.hex",
@@ -64,7 +64,7 @@ module ics_adpcm #(
     output [6:0] dbg_adpcm_step_index,
     output reg dbg_adpcm_valid
 );
-    localparam LOG2_DIVISOR = $clog2(CLOCK_DIVISOR);
+    localparam LOG2_DIVISOR = $clog2(OUTPUT_INTERVAL);
     localparam DIVIDER_BITS = LOG2_DIVISOR;
 
     localparam P_REG_READ_LATENCY = 1;
@@ -80,7 +80,7 @@ module ics_adpcm #(
     // --- Output clock divider ---
 
     reg [DIVIDER_BITS: 0] output_counter;
-    wire output_ready = {{31 - DIVIDER_BITS{1'b0}}, output_counter} == CLOCK_DIVISOR;
+    wire output_ready = {{31 - DIVIDER_BITS{1'b0}}, output_counter} == OUTPUT_INTERVAL;
 
     always @(posedge clk) begin 
         if (reset || output_ready) begin
@@ -994,7 +994,7 @@ module ics_adpcm #(
 
     always @(posedge clk) begin
         if (past_valid) begin
-            assert(output_counter <= CLOCK_DIVISOR);
+            assert(output_counter <= OUTPUT_INTERVAL);
         end
     end
 

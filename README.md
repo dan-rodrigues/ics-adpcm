@@ -1,22 +1,22 @@
 # ics-adpcm
 
-This is a programmable IMA-ADPCM decoder / mixer. It can be configured with up to 16 ADPCM channels (or "voices") with independent volumes and playback rates which share a 16MByte address space. The output mix is signed 16bit stereo PCM.
+This is a programmable IMA-ADPCM decoder / mixer. It can be configured with up to 16 ADPCM channels (or "voices") with independent volumes and playback rates. Sample data is loaded from a shared 16MByte address space. The output mix is signed 16bit stereo PCM.
 
 The aim is to minimize resource use and support slower, low power devices such as the Lattice iCE40 UP5K (logic cost is about 1000LCs, or less than 20%).
 
 ## Design goals
 
 * Minimize resource use
-     * Register files are implemented in a way that can be inferred as block RAMs* instead of using FFs. On iCE40,2x 512byte RAMs are used.
+     * Register files are implemented in a way that can be inferred as block RAMs instead of using FFs. On iCE40,2x 512byte RAMs are used.
      * Only one multiplier is used. On iCE40 UP5K, 1 "DSP Block" is used.
 * Favor fmax over performance
-     * One target for htis project is > 35MHz on an UP5K
+     * One target for this project is > 35MHz on an UP5K
      * Other device shouldn't have much trouble meeting timing at >= 100MHz
 
 ## Features
 
-* Playback of up to 16 concurrrent, independently configurable ADPCM channels.
-* ADPCM data loaded from a single 16MByte address space using a ready/valid interface to also support slower memories i.e. flash.
+* Playback of up to 16 concurrent, independently configurable ADPCM channels.
+* ADPCM data loaded from a shared 16MByte address space using a ready/valid interface to also support slower memories i.e. flash.
 * Per-channel signed 8bit stereo volume control.
 * Per-channel Q4.12 16bit playback rate. This gives a maximum playback rate of approx. 16.0 the output rate and a minimum of (1/4096 = 0.0002).
 
@@ -41,13 +41,13 @@ The IMA-ADPCM data used is compatible with what ffmpeg generates with the follow
 ffmpeg -i input.wav -ac 1 -f s16le -acodec adpcm_ima_wav output.adpcm
 ```
 
-ffmpeg can be used to encode samples for playback but depending on the source material, a lookahead encoder such as [adpcm-xq](https://github.com/dbry/adpcm-xq) may produce better results. The required format is:
+ffmpeg can be used to encode samples for playback but depending on the source material, a lookahead encoder such as [adpcm-xq](https://github.com/dbry/adpcm-xq) may produce better results. The expected header, which ffmpeg creates by default, is:
 
 * 2 bytes: Initial predictor
 * 2 bytes: Initial step index (high byte ignored)
-* 1kbyte block size
 
-The block size in 4bit nybbles can be configured using the `ADPCM_BLOCK_SIZE` but the default is to use what the above encoders (and many otherrs) default to.
+
+The block size in 4bit nybbles can be configured using the `ADPCM_BLOCK_SIZE` but the default is to use what the above encoders (and many others) default to, which is 1kbyte.
 
 ## Usage
 
@@ -70,7 +70,7 @@ The start address for each channel is `(channel_id * 8 + offset)`.
 | 0 | `START` | 14 | PCM memory start address
 | 1 | `FLAGS` | 1 | `FLAGS[0]`: Enables automatic looping once `END` is reached. Playback ends otherwise.
 | 2 | `END`| 14 | PCM memory end address. This isn't inclusive so the block this points to isn't played, so this should be set to address of (final block + 1). Playback stops unless `FLAGS[0]` is set to enable automatic looping.
-| 3 | `LOOP` | 14 | PCM memory loop address. If `FLAGS[0]` is set and `END` is reached, playback restarts from this address. This value must be >= `START` && < `END`.
+| 3 | `LOOP` | 14 | PCM memory loop address. If `FLAGS[0]` is set and `END` is reached, playback restarts from this address. This value must be `>= START && < END`.
 | 4 | `VOLUMES` | 16 | 8bit signed volumes. High 8bits is R, low 8bits is L.
 | 5 | `PITCH` | 16 | Playback rate. Q4.12 fixed point value, so `0x1000` is a playback rate of 1.0. If the output rate is 44.1KHz, `PITCH = 0x800` would play the sample at (44.1KHz / 2 = 22.05KHz).
 

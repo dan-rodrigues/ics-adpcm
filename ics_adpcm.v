@@ -7,28 +7,47 @@
 `default_nettype none
 
 module ics_adpcm #(
-    parameter integer CLOCK_DIVISOR = 33700000 / 44100,
+    parameter integer OUTPUT_INTERVAL = 33700000 / 44100,
     parameter [15:0] ADPCM_BLOCK_SIZE = 1024 * 2,
     parameter [3:0] CHANNELS = 8,
-    parameter ADPCM_STEP_LUT_PATH = "adpcm_step_lut.hex"
+    parameter ADPCM_STEP_LUT_PATH = "adpcm_step_lut.hex",
+
+    // Derived parameters:
+    // Verilog-2005 doesn't allow localparams to be used in port list although OSS tools allow it
+    parameter CHANNEL_MSB = CHANNELS - 1
 ) (
     input clk,
     input reset,
 
-    // Host interface
+    // Channel register writing
 
-    input [8:0] host_address,
-    input host_read_en,
-    input [15:0] host_write_data,
-    input host_write_en,
-    input [1:0] host_write_byte_mask,
+    input [7:0] ch_write_address,
+    input [15:0] ch_write_data,
+    input ch_write_en,
+    input [1:0] ch_write_byte_mask,
+    output reg ch_write_ready,
 
-    output [7:0] host_read_data,
-    output reg host_ready,
+    // Global register writing
+
+    input [0:0] gb_write_address,
+    input [CHANNEL_MSB:0] gb_write_data,
+    input gb_write_en,
+    output reg gb_write_ready,
+
+    // Status register reading
+
+    input [0:0] status_read_address,
+    output reg [CHANNEL_MSB:0] status_read_data,
+
+    // Audio flags
+
+    output reg gb_write_busy,
+    output reg [CHANNEL_MSB:0] gb_ended,
+    output reg [CHANNEL_MSB:0] gb_playing,
 
     // PCM memory interface
 
-    output [23:0] pcm_read_address,
+    output [22:0] pcm_read_address,
     output reg pcm_address_valid,
     input pcm_data_ready,
     input [15:0] pcm_read_data,
@@ -45,15 +64,13 @@ module ics_adpcm #(
     output [6:0] dbg_adpcm_step_index,
     output reg dbg_adpcm_valid
 );
-    localparam LOG2_DIVISOR = $clog2(CLOCK_DIVISOR);
+    localparam LOG2_DIVISOR = $clog2(OUTPUT_INTERVAL);
     localparam DIVIDER_BITS = LOG2_DIVISOR;
 
     localparam P_REG_READ_LATENCY = 1;
     localparam REG_READ_LATENCY = 2;
 
     localparam ADPCM_BLOCK_WIDTH = $clog2(ADPCM_BLOCK_SIZE) - 1;
-
-    localparam CHANNEL_MSB = CHANNELS - 1;
 
     // --- Debug ---
 
@@ -63,7 +80,7 @@ module ics_adpcm #(
     // --- Output clock divider ---
 
     reg [DIVIDER_BITS: 0] output_counter;
-    wire output_ready = {{31 - DIVIDER_BITS{1'b0}}, output_counter} == CLOCK_DIVISOR;
+    wire output_ready = {{31 - DIVIDER_BITS{1'b0}}, output_counter} == OUTPUT_INTERVAL;
 
     always @(posedge clk) begin 
         if (reset || output_ready) begin
@@ -92,8 +109,6 @@ module ics_adpcm #(
 
     reg acc_add_left;
     reg acc_add_right;
-
-    wire acc_complete = acc_add_right;
 
     always @(posedge clk) begin
         acc_add_left <= acc_start;
@@ -147,85 +162,109 @@ module ics_adpcm #(
 
     // --- Registered inputs for writes ---
 
-    // The others don't end up in the critical path and don't need delaying regardless
+    reg [7:0] ch_write_address_r;
+    reg [15:0] ch_write_data_r;
+    reg ch_write_en_r, gb_write_en_r;
 
-    reg [8:0] host_address_r;
-    reg [15:0] host_write_data_r;
-    reg host_write_en_r;
-    reg host_read_en_r;
+    reg [0:0] gb_write_address_r;
 
     wire regs_has_contention = reg_write_address == reg_read_address;
 
     always @(posedge clk) begin
-        host_address_r <= host_address;
-        host_write_data_r <= host_write_data;
-        host_write_en_r <= host_write_en;
-        host_read_en_r <= host_read_en;
+        ch_write_address_r <= ch_write_address;
+        ch_write_data_r <= ch_write_data;
+        ch_write_en_r <= ch_write_en;
+
+        gb_write_address_r <= gb_write_address[0];
+        gb_write_en_r <= gb_write_en;
     end
 
     // --- Global registers ---
 
     // Writes:
 
-    reg [CHANNEL_MSB:0] gb_ch_start, gb_ch_stop;
-
-    wire gb_regs_write_en = host_address_r[8] && host_write_en_r;
+    reg [CHANNEL_MSB:0] gb_start, gb_stop;
 
     always @(posedge clk) begin
-        if (output_ready) begin
-            gb_ch_start <= 0;
-            gb_ch_stop <= 0;
+        if (reset || output_ready) begin
+            gb_start <= 0;
+            gb_stop <= 0;
+
+            gb_write_busy <= 0;
         end
 
-        if (gb_regs_write_en) begin
-            case (host_address[1:0])
-                0: gb_ch_start <= host_write_data_r[CHANNEL_MSB:0];
-                1: gb_ch_stop <= host_write_data_r[CHANNEL_MSB:0];
+        // These writes take precedence over the reset above
+
+        if (gb_write_en_r) begin
+            case (gb_write_address_r[0])
+                0: gb_start <= gb_write_data[CHANNEL_MSB:0];
+                1: gb_stop <= gb_write_data[CHANNEL_MSB:0];
             endcase
+
+            gb_write_busy <= 1;
         end
     end
 
     // Reads:
 
-    // There are no other registers to read at the moment
-    assign host_read_data = gb_ch_ended;
+    reg [0:0] status_read_address_r;
+
+    always @(posedge clk) begin
+        status_read_address_r <= status_read_address;
+    end
+
+    always @(posedge clk) begin
+        status_read_data[CHANNEL_MSB:1] <= gb_ended[CHANNEL_MSB:1];
+        status_read_data[0] <= status_read_address_r[0] ? gb_write_busy : gb_ended[0];
+    end
 
     // Channel trigger shift register copy for FSM
 
     wire ch_complete = (state == STATE_CH_COMPLETE);
 
-    reg [CHANNEL_MSB:0] gb_ch_start_shift, gb_ch_stop_shift;
-    wire gb_ch_start_current = gb_ch_start_shift[0];
-    wire gb_ch_stop_shift_current = gb_ch_stop_shift[0];
+    reg [CHANNEL_MSB:0] gb_start_shift, gb_stop_shift;
+    wire gb_start_current = gb_start_shift[0];
+    wire gb_stop_shift_current = gb_stop_shift[0];
 
     always @(posedge clk) begin
-        if (output_ready) begin
-            gb_ch_start_shift <= gb_ch_start;
-            gb_ch_stop_shift <= gb_ch_stop;
+        if (reset) begin
+            gb_stop_shift <= {CHANNELS{1'b1}};
+            gb_start_shift <= 0;
+        end if (output_ready) begin
+            gb_start_shift <= gb_start;
+            gb_stop_shift <= gb_stop;
         end else if (ch_complete) begin
-            gb_ch_stop_shift <= gb_ch_stop_shift >> 1;
-            gb_ch_start_shift <= gb_ch_start_shift >> 1;
+            gb_stop_shift <= gb_stop_shift >> 1;
+            gb_start_shift <= gb_start_shift >> 1;
         end
     end
 
-    // Channel-ended states
+    // Channel start/end states
 
     wire ch_last = (ch == (CHANNELS - 1));
 
-    reg [CHANNEL_MSB:0] gb_ch_ended, gb_ch_started;
-    reg [CHANNEL_MSB:0] gb_ch_ended_shift, gb_ch_started_shift;
+    reg [CHANNEL_MSB:0] gb_ended_shift, gb_started_shift, gb_playing_shift;
+    reg gb_playing_current;
 
     always @(posedge clk) begin
-        if (output_ready) begin
-            gb_ch_ended <= (gb_ch_ended | gb_ch_ended_shift) & ~gb_ch_started_shift;
-            gb_ch_ended_shift <= 0;
-            gb_ch_started_shift <= 0;
+        if (reset) begin
+            gb_ended <= 0;
+            gb_playing <= 0;
+        end else if (output_ready) begin
+            gb_ended <= (gb_ended | gb_ended_shift) & ~gb_started_shift;
+            gb_ended_shift <= 0;
+            gb_started_shift <= 0;
+
+            gb_playing <= gb_playing_shift;
+            gb_playing_shift <= 0;
         end else if (ch_complete && !ch_last) begin
-            gb_ch_ended_shift <= gb_ch_ended_shift >> 1;
-            gb_ch_started_shift <= gb_ch_started_shift >> 1;
+            gb_ended_shift <= gb_ended_shift >> 1;
+            gb_started_shift <= gb_started_shift >> 1;
+            gb_playing_shift <= gb_playing_shift >> 1;
         end else begin
-            gb_ch_ended_shift[CHANNEL_MSB] <= gb_ch_ended_shift[CHANNEL_MSB] | ch_ended;
-            gb_ch_started_shift[CHANNEL_MSB] <= gb_ch_started_shift[CHANNEL_MSB] | gb_ch_start_current;
+            gb_ended_shift[CHANNEL_MSB] <= gb_ended_shift[CHANNEL_MSB] | ch_ended;
+            gb_started_shift[CHANNEL_MSB] <= gb_started_shift[CHANNEL_MSB] | gb_start_current;
+            gb_playing_shift[CHANNEL_MSB] <= gb_playing_shift[CHANNEL_MSB] | gb_playing_current;
         end
     end
 
@@ -243,8 +282,6 @@ module ics_adpcm #(
 
     reg [15:0] regs [0:255];
 
-    wire regs_write_en = !host_address_r[8] && host_write_en_r;
-
     reg regs_read_en;
 
     always @* begin
@@ -261,17 +298,17 @@ module ics_adpcm #(
     // Read / Write:
 
     wire [7:0] reg_read_address = {1'b0, ch, regs_index};
-    wire [7:0] reg_write_address = host_address_r[7:0];
+    wire [7:0] reg_write_address = ch_write_address_r;
     reg [15:0] reg_read_ram_output;
     reg [15:0] reg_read_data;
 
     always @(posedge clk) begin
-        if (regs_write_en && !(regs_read_en && regs_has_contention)) begin
-            if (host_write_byte_mask[0]) begin
-                regs[reg_write_address][7:0] <= host_write_data_r[7:0];
+        if (ch_write_en_r && !(regs_read_en && regs_has_contention)) begin
+            if (ch_write_byte_mask[0]) begin
+                regs[reg_write_address][7:0] <= ch_write_data_r[7:0];
             end
-            if (host_write_byte_mask[1]) begin
-                regs[reg_write_address][15:8] <= host_write_data_r[15:8];
+            if (ch_write_byte_mask[1]) begin
+                regs[reg_write_address][15:8] <= ch_write_data_r[15:8];
             end
         end
 
@@ -283,14 +320,33 @@ module ics_adpcm #(
 
     // Delay the write acknowledge incase the write was prevented to avoid contention
 
+    reg regs_write_pending;
+    reg regs_write_en_d, gb_regs_write_en_d;
+
+    wire regs_written = !(regs_read_en && regs_has_contention) && regs_write_pending;
+    wire regs_write_en_rose = (!regs_write_en_d && ch_write_en_r);
+    wire gb_regs_write_en_rose = (!gb_regs_write_en_d && gb_write_en_r);
+
     always @(posedge clk) begin
-        if (regs_write_en) begin
-            host_ready <= !(regs_read_en && regs_has_contention);
-        end else if (gb_regs_write_en || host_read_en_r) begin
-            host_ready <= 1;
+        regs_write_pending <= (regs_write_en_rose || regs_write_pending) && !regs_written;
+
+        regs_write_en_d <= ch_write_en_r;
+        gb_regs_write_en_d <= gb_write_en_r;
+    end
+
+    always @(posedge clk) begin
+        if (reset) begin
+            ch_write_ready <= 0;
+        end else if (ch_write_en_r) begin
+            // Active for a single cycle only
+            ch_write_ready <= regs_written;
         end else begin
-            host_ready <= 0;
+            ch_write_ready <= 0;
         end
+    end
+
+    always @(posedge clk) begin
+        gb_write_ready <= gb_regs_write_en_rose;
     end
 
     // --- Private RAM ---
@@ -308,12 +364,13 @@ module ics_adpcm #(
 
     reg [15:0] p_regs [0:255];
 
-    // Only bottom 2 bits used for address, top bit is part of the index though
+    // Bottom 2 bits used for address
+    // MSB used in FSM below
     reg [2:0] p_regs_index;
-    reg [2:0] p_regs_write_index;
-    wire [7:0] p_regs_write_address = {2'b0, ch, p_regs_write_index[1:0]};
 
     reg p_reg_write_en;
+    reg [1:0] p_regs_write_index;
+    wire [7:0] p_regs_write_address = {2'b0, ch, p_regs_write_index[1:0]};
 
     wire [7:0] p_regs_address = {2'b0, ch, p_regs_index[1:0]};
     reg [15:0] p_reg_read_data, p_reg_write_data;
@@ -335,13 +392,13 @@ module ics_adpcm #(
     reg p_regs_write_complete;
     wire p_regs_start_writing = state_changed_to(STATE_CH_VOLUME);
 
-    wire [2:0] p_regs_index_writing_offset = p_regs_write_index + 1;
+    wire [1:0] p_regs_index_writing_offset = p_regs_write_index + 1;
 
     always @(posedge clk) begin
         p_regs_write_complete <= 0;
         p_reg_write_en <= p_regs_writing;
 
-        case (p_regs_index_writing_offset[1:0])
+        case (p_regs_index_writing_offset)
             P_REG_PCM_INDEX_LO: p_reg_write_data <= pcm_target_index[15:0];
             P_REG_PCM_INDEX_HI: p_reg_write_data <= pcm_target_index[31:16];
             P_REG_ADPCM_PREDICTOR: p_reg_write_data <= adpcm_predictor;
@@ -394,7 +451,7 @@ module ics_adpcm #(
 
     genvar i;
     generate
-        for (i = 128 + 89; i < 256; i = i + 1) begin
+        for (i = 128 + 89; i < 255; i = i + 1) begin
             initial begin
                 p_regs[i] = 16'h8000 + 88;
             end
@@ -462,11 +519,10 @@ module ics_adpcm #(
     // Target address is reached when stepping index catches up to the target
     reg pcm_target_address_reached;
 
-    // *bottom 12 bits are not used*
-    reg [36:0] pcm_stepping_index;
-    assign pcm_read_address = {pcm_stepping_index[36:14], 1'b0};
+    reg [24:0] pcm_stepping_index;
+    assign pcm_read_address = pcm_stepping_index[24:2];
 
-    wire block_starting = gb_ch_start_current || adpcm_block_ended;
+    wire block_starting = gb_start_current || adpcm_block_ended;
 
     reg [13:0] end_block, loop_block;
     reg end_block_reached;
@@ -475,9 +531,9 @@ module ics_adpcm #(
     // Register anything involving big comparators to aid timing
 
     always @(posedge clk) begin
-        pcm_target_address_reached <= pcm_stepping_index[36:12] == pcm_target_index[36:12];
-        end_block_reached <= (end_block == pcm_stepping_index[36:ADPCM_BLOCK_WIDTH + 12 + 1]);
-        adpcm_block_ended <= pcm_stepping_index[ADPCM_BLOCK_WIDTH + 12: 12] == 0;
+        pcm_target_address_reached <= pcm_stepping_index == pcm_target_index[36:12];
+        end_block_reached <= (end_block == pcm_stepping_index[24:ADPCM_BLOCK_WIDTH + 1]);
+        adpcm_block_ended <= pcm_stepping_index[ADPCM_BLOCK_WIDTH:0] == 0;
     end
 
     // --- PCM data registering ---
@@ -489,10 +545,10 @@ module ics_adpcm #(
     // 2bits + 1bit carry = 3bits required for a comparator to see if registered word is still valid
 
     reg [2:0] pcm_stepping_index_previous_word;
-    wire pcm_registered_data_valid = pcm_stepping_index[16:14] == pcm_stepping_index_previous_word;
+    wire pcm_registered_data_valid = pcm_stepping_index[4:2] == pcm_stepping_index_previous_word;
 
     always @(posedge clk) begin
-        pcm_data_ready_r <= pcm_data_ready;
+        pcm_data_ready_r <= pcm_data_ready && pcm_address_valid;
 
         if (pcm_address_valid) begin
             pcm_read_data_r <= pcm_read_data;
@@ -510,7 +566,7 @@ module ics_adpcm #(
     wire adpcm_nybble_sign = adpcm_nybble[3];
 
     always @* begin
-        case (pcm_stepping_index[13:12])
+        case (pcm_stepping_index[1:0])
             0: adpcm_nybble = pcm_read_data_r[3:0];
             1: adpcm_nybble = pcm_read_data_r[7:4];
             2: adpcm_nybble = pcm_read_data_r[11:8];
@@ -617,6 +673,7 @@ module ics_adpcm #(
 
         ctrl_complete <= 0;
         ch_ended <= 0;
+        gb_playing_current <= 0;
 
         dbg_adpcm_valid <= 0;
 
@@ -643,7 +700,7 @@ module ics_adpcm #(
             end
             STATE_REG_SETUP: begin
                 // Early exit if channel isn't playing
-                if (!ch_ctrl_p[CH_CTRL_P_PLAYING] && !gb_ch_start_current) begin
+                if (!ch_ctrl_p[CH_CTRL_P_PLAYING] && !gb_start_current) begin
                     state <= STATE_CH_COMPLETE;
                 end
 
@@ -652,11 +709,13 @@ module ics_adpcm #(
                 end
 
                 regs_index <= regs_index + 1;
+
+                gb_playing_current <= ch_ctrl_p[CH_CTRL_P_PLAYING];
             end
             STATE_CTRL_CHECK: begin
                 case (output_reg_offset(regs_index))
                     REG_START: begin
-                        if (gb_ch_start_current) begin
+                        if (gb_start_current) begin
                             pcm_target_index[11:0] <= 0;
                             pcm_target_index[ADPCM_BLOCK_WIDTH + 12:12] <= 0;
                             pcm_target_index[36:ADPCM_BLOCK_WIDTH + 12 + 1] <= reg_read_data[13:0];
@@ -670,8 +729,8 @@ module ics_adpcm #(
                     REG_FLAGS: begin
                         loop_check_needed <= reg_read_data[CH_CTRL_LOOP];
 
-                        // Stepping index used for addressing must be copied before any pitch adjustment
-                        pcm_stepping_index <= pcm_target_index;
+                        // Stepping index, used for addressing, must be copied before any pitch adjustment
+                        pcm_stepping_index <= pcm_target_index[36:12];
                     end 
                     REG_END: begin
                         end_block <= reg_read_data[13:0];
@@ -694,8 +753,9 @@ module ics_adpcm #(
                     end
                 endcase
 
-                if (gb_ch_stop_shift_current) begin
+                if (gb_stop_shift_current) begin
                     ch_ctrl_p[CH_CTRL_P_PLAYING] <= 0;
+                    ch_ended <= 1;
                     ctrl_complete <= 1;
                 end
 
@@ -723,15 +783,18 @@ module ics_adpcm #(
                         state <= STATE_READ_WAIT;
                     end
                 end else begin
-                    state <= STATE_CH_COMPLETE;
+                    // Channel state is written back as part of this step
+                    // This is needed to cover the case of ch_ctrl_p being updated to stop channel
+                    state <= STATE_CH_VOLUME;
                 end
             end
             STATE_ADPCM_WAIT_INIT_PREDICTOR: begin
                 adpcm_predictor <= pcm_read_data_r;
 
                 if (pcm_data_ready_r) begin
-                    // advance both since these header bytes aren't factored into the pitch
-                    pcm_stepping_index[14] <= 1;
+                    // Both stepping and target index are advanced when reading ADPCM headers
+                    // Needed because header bytes are not factored into the pitch (playback rate)
+                    pcm_stepping_index[2] <= 1;
                     pcm_target_index[36:14] <= pcm_target_index[36:14] + 1;
 
                     // Signal to PCM memory controller that another word is needed
@@ -746,7 +809,7 @@ module ics_adpcm #(
                 adpcm_step_index <= pcm_read_data_r[6:0];
                 
                 if (pcm_data_ready_r && !state_changed_to(STATE_ADPCM_WAIT_INIT_INDEX)) begin
-                    pcm_stepping_index[15:14] <= 2'b10;
+                    pcm_stepping_index[3:2] <= 2'b10;
                     pcm_target_index[36:14] <= pcm_target_index[36:14] + 1;
 
                     pcm_address_valid <= 0;
@@ -772,8 +835,8 @@ module ics_adpcm #(
             STATE_ADPCM_COMPUTE_DIFF: begin
                 if (adpcm_diff_compute_complete) begin
                     // Prepare stepping address for check next state (1 sample advanced)
-                    pcm_stepping_index[36:12] <= pcm_stepping_index[36:12] + 1;
-                    pcm_stepping_index_previous_word <= pcm_stepping_index[16:14];
+                    pcm_stepping_index <= pcm_stepping_index + 1;
+                    pcm_stepping_index_previous_word <= pcm_stepping_index[4:2];
 
                     state <= STATE_ADPCM_STORE_DIFF;
                 end
@@ -812,8 +875,8 @@ module ics_adpcm #(
             STATE_CH_LOOP: begin
                 // PCM must catch up to stepping index, so reset in-block index to 0
                 // Loop address must always point to start of ADPCM block
-                pcm_stepping_index[ADPCM_BLOCK_WIDTH + 12:12] <= 0;
-                pcm_stepping_index[36:ADPCM_BLOCK_WIDTH + 12 + 1] <= loop_block;
+                pcm_stepping_index[ADPCM_BLOCK_WIDTH:0] <= 0;
+                pcm_stepping_index[24:ADPCM_BLOCK_WIDTH + 1] <= loop_block;
 
                 pcm_target_index[36:ADPCM_BLOCK_WIDTH + 12 + 1] <= loop_block;
 
@@ -861,10 +924,10 @@ module ics_adpcm #(
         endcase
 
         if (reset) begin
+            state <= STATE_LOAD_REGS;
             p_regs_index <= 0;
             regs_index <= 0;
             ch <= 0;
-            state <= STATE_LOAD_REGS;
             output_valid <= 0;
             pcm_address_valid <= 0;
 
@@ -931,64 +994,70 @@ module ics_adpcm #(
 
     always @(posedge clk) begin
         if (past_valid) begin
-            assert(output_counter <= CLOCK_DIVISOR);
+            assert(output_counter <= OUTPUT_INTERVAL);
         end
     end
 
     always @(posedge clk) begin
         if (valid_counter > 2) begin
             // If a global reg is written in same cycle as its normally cleared..
-            if ($past(output_ready) && $past(gb_regs_write_en)) begin
+            if ($past(output_ready) && $past(gb_write_en_r)) begin
                 // ..the written data should persist
-                case ($past(host_address[1:0]))
-                    0: assert(gb_ch_start == $past(host_write_data[7:0]));
-                    1: assert(gb_ch_stop == $past(host_write_data[7:0]));
+                case ($past(ch_write_address[1:0]))
+                    0: assert(gb_start == $past(gb_write_data[CHANNEL_MSB:0]));
+                    1: assert(gb_stop == $past(gb_write_data[CHANNEL_MSB:0]));
                 endcase
+
+                // ..busy flag should be set rather than being cleared in the same cycle
+                assert(gb_write_busy);
+            end
+
+            // If a global reg is written..
+            if ($past(gb_write_en_r)) begin
+                // ..busy flag should be set
+                assert(gb_write_busy);
             end
 
             // If there was contention..
-            if ($past(regs_has_contention) && $past(regs_write_en) && $past(regs_read_en)) begin
+            if ($past(regs_has_contention) && $past(ch_write_en_r) && $past(regs_read_en)) begin
                 // ..then the write should be deferred
 
-                // assert($stable(regs[$past(host_address_r)]));
-                assert($past(regs[host_address_r]) == regs[$past(host_address_r)]);
+                assert($past(regs[ch_write_address_r]) == regs[$past(ch_write_address_r)]);
 
                 // ..then the ready flag should not be set as the write is being deferred
-                assert(!host_ready);
+                assert(!ch_write_ready);
             end
 
             // If there isn't contention during a write..
-            if ($past(!regs_has_contention) && $past(regs_write_en)) begin
+            if ($past(!regs_has_contention) && $past(ch_write_en_r) && $past(regs_write_pending)) begin
                 // ..then the write shouldn't be deferred
-                assert(host_ready);
+                assert(ch_write_ready);
             end
 
-            // If there was a write, the byte mask was respected
-            if ($past(regs_write_en) && $past(!regs_has_contention)) begin
-                case ($past(host_write_byte_mask))
+            // If there was a write, the byte mask should be respected
+            if ($past(ch_write_en_r) && $past(!regs_has_contention)) begin
+                case ($past(ch_write_byte_mask))
                     2'b00: begin
-                        assert($past(regs[host_address_r]) == regs[$past(host_address_r)]);
+                        assert($past(regs[ch_write_address_r]) == regs[$past(ch_write_address_r)]);
                     end
-                    // Part-select does not work as expected for these cases
                     2'b01: begin
-                        assert(($past(regs[host_address_r]) &16'hff00) == (regs[$past(host_address_r)] & 16'hff00));
-                        assert(($past(host_write_data_r) &16'h00ff) == (regs[$past(host_address_r)] & 16'h00ff));
+                        assert(($past(regs[ch_write_address_r]) & 16'hff00) == (regs[$past(ch_write_address_r)] & 16'hff00));
+                        assert(($past(ch_write_data_r) & 16'h00ff) == (regs[$past(ch_write_address_r)] & 16'h00ff));
                     end
                     2'b10: begin
-                        assert(($past(regs[host_address_r]) &16'h00ff) == (regs[$past(host_address_r)] & 16'h00ff));
-                        assert(($past(host_write_data_r) &16'hff00) == (regs[$past(host_address_r)] & 16'hff00));
+                        assert(($past(regs[ch_write_address_r]) & 16'h00ff) == (regs[$past(ch_write_address_r)] & 16'h00ff));
+                        assert(($past(ch_write_data_r) & 16'hff00) == (regs[$past(ch_write_address_r)] & 16'hff00));
+                    end
+                    2'b11: begin
+                        assert($past(ch_write_data_r) == regs[$past(ch_write_address_r)]);
                     end
                 endcase
-            end
-
-            // If there was a read, there should be no added delays
-            if ($past(host_read_en_r) && $past(!host_write_en_r)) begin
-                assert(host_ready);
             end 
 
-            // If there was neither a read or write, the ready flag should be clear
-            if ($past(!host_read_en_r) && $past(!host_write_en_r)) begin
-                assert(!host_ready);
+            // If there was neither a channel write..
+            if ($past(!ch_write_en_r)) begin
+                // ..the ready flag should be clear
+                assert(!ch_write_ready);
             end
 
             // If...

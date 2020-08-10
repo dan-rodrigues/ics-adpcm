@@ -1,5 +1,5 @@
-#ifndef adpcm_dsp_hpp
-#define adpcm_dsp_hpp
+#ifndef Control_hpp
+#define Control_hpp
 
 #include <stdint.h>
 
@@ -29,4 +29,4 @@ struct AudioChannel {
     uint16_t pitch;
 };
 
-#endif /* adpcm_dsp_hpp */
+#endif /* Control_hpp */

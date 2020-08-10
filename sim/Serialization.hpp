@@ -1,7 +1,7 @@
 #ifndef Serialization_hpp
 #define Serialization_hpp
 
-#include "DSPControl.hpp"
+#include "Control.hpp"
 #include "json.hpp"
 #include "TestConfig.hpp"
 

@@ -89,8 +89,8 @@ Signed 16bit stereo output is updated once per `OUTPUT_INTERVAL` cycles. `output
  
 ## Tests
 
-* The [/sim](/sim) directory contains Verilator-driven tests that assert that the ADPCM decoding and PCM output work as exepcted for different test cases
-* The [/formal](/formal) directory contains SymbiYosys-driven tests for parts of the control interface. The PCM decoding / mixing / output is ignored which is covered by the above tests instead
+* The [/sim](/sim) directory contains Verilator-driven tests that assert that the ADPCM decoding and PCM output work as exepcted for different test cases. Note git-lfs is required to checkout the test reference files.
+* The [/formal](/formal) directory contains SymbiYosys-driven tests for parts of the control interface. The PCM decoding / mixing / output is ignored which is covered by the above tests instead.
 
 ## Demo
 

@@ -1,6 +1,8 @@
 ## Demo
 
-This demo uses 3 preloaded samples to play audio. Samples are loaded into ECP5 block RAM so preloading onto flash isn't necessary. The samples are about 30kbyte total so the ECP5-12 should be capable of running this demo too.
+This demo uses 3 preloaded samples to play audio under user control. Samples are loaded into ECP5 block RAM so preloading onto flash isn't necessary. The samples are about 30kbyte total so the ECP5-12 should be capable of running this demo too.
+
+It includes 2 modes:
 
 * Manual control using user buttons to play different notes and samples.
 * Automatic control using a simple integrated tracker
@@ -31,4 +33,4 @@ Output is currently sent to the headphone jack. It's pretty noisy so in the futu
 
 ## TODO
 
-* Add iCEBreaker target can serve as a use case for streaming audio from flash rather than block RAM.
+* Add iCEBreaker target. This can serve as a use case for streaming large audio tracks from flash rather than block RAM.

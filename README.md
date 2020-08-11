@@ -7,11 +7,11 @@ The aim is to minimize resource use and support slower, low power devices such a
 ## Design goals
 
 * Minimize resource use
-     * Register files are implemented in a way that can be inferred as block RAMs instead of using FFs. On iCE40,2x 512byte RAMs are used.
+     * Register files are implemented in a way that can be inferred as block RAMs instead of using FFs. On iCE40, 2x 512byte RAMs are used.
      * Only one multiplier is used. On iCE40 UP5K, 1 "DSP Block" is used.
 * Favor fmax over performance
-     * One target for this project is > 35MHz on an UP5K
-     * Other device shouldn't have much trouble meeting timing at >= 100MHz
+     * One target for this project is >35MHz on an UP5K
+     * Other device shouldn't have much trouble meeting timing at >100MHz
 
 ## Features
 
@@ -78,10 +78,28 @@ The start address for each channel is `(channel_id * 8 + offset)`.
 
 Channels are started and stopped using a separate interface using ports prefixed with `gb_write_`. There is 1 bit per configured channel, so the width of these registers depends on the value of the `CHANNELS` parameter. These registers serve as the key-on / key-off control.
 
+`gb_write_busy` is asserted immediately after a write to these registers and remains asserted until the write is committed. Attempting a write while busy will overwrite the previously staged value. Writes are commited once per `OUTPUT_INTERVAL` cycles. The busy flag is also asserted on reset to mute all channels.
+
 | Offset | Name | Description
 | ------ | ---- | -----------
 | 0 | `PLAY` | Channels with a corresponding bit set to 1 will (re)start playback. All 0 bits are ignored.
 | 1 | `STOP` | Channels with a corresponding bit set to 1 will stop playback. All 0 bits are ignored.
+
+### Status registers
+
+`status_read_address` and `status_read_data` can be used to read certain channel state. May be useful if the module is driven by a CPU.
+
+| Offset | Name | Description
+| ------ | ---- | -----------
+| 0 | `ENDED` | Channels with a corresponding bit set have ended playback. The bit remains set until playback is started again.
+| 1 | `BUSY` | `BUSY[0]` outputs the value of `gb_write_busy`. All other bits are undefined.
+
+### Other flags
+
+These may be useful if the module is driven by an FSM rather than a CPU:
+
+* `gb_ended` outputs the value of `ENDED`.
+* `gb_playing` outputs a mask of all currently playing channels.
 
 ### Audio output
 

@@ -221,7 +221,7 @@ module ics_adpcm #(
     end
 
     // Delay status_read_ready by 2 cycles
-    
+
     always @(posedge clk) begin
         status_read_ready_d <= status_read_request_rose;
         status_read_ready <= status_read_ready_d;
@@ -1072,6 +1072,18 @@ module ics_adpcm #(
             if ($past(!ch_write_en_r)) begin
                 // ..the ready flag should be clear
                 assert(!ch_write_ready);
+            end
+
+            // If a status read was just requested..
+            if ($past(status_read_request) && $past(!status_read_request, 2) && $past(!status_read_request, 3)) begin
+                // ..the ready flag should be 0 as it needs to be delayed 2 cycles
+                assert(!status_read_ready);
+            end
+
+            // If a status read was previously requested..
+            if ($past(status_read_request, 2) && $past(!status_read_request, 3) && $past(!status_read_request, 4)) begin
+                // ..the ready flag should now be set
+                assert(status_read_ready);
             end
 
             // If...

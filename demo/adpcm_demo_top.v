@@ -482,6 +482,7 @@ module adpcm_demo_top #(
         .gb_playing(led[2:0]),
 
         .status_read_address(0),
+        .status_read_request(0),
 
         .pcm_read_address(pcm_read_address),
         .pcm_read_data(pcm_read_data),

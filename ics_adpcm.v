@@ -37,6 +37,8 @@ module ics_adpcm #(
     // Status register reading
 
     input [0:0] status_read_address,
+    input status_read_request,
+    output reg status_read_ready,
     output reg [CHANNEL_MSB:0] status_read_data,
 
     // Audio flags
@@ -209,8 +211,20 @@ module ics_adpcm #(
 
     reg [0:0] status_read_address_r;
 
+    reg status_read_request_r;
+    wire status_read_request_rose = !status_read_request_r && status_read_request;
+    reg status_read_ready_d;
+
     always @(posedge clk) begin
         status_read_address_r <= status_read_address;
+        status_read_request_r <= status_read_request;
+    end
+
+    // Delay status_read_ready by 2 cycles
+
+    always @(posedge clk) begin
+        status_read_ready_d <= status_read_request_rose;
+        status_read_ready <= status_read_ready_d;
     end
 
     always @(posedge clk) begin
@@ -1058,6 +1072,18 @@ module ics_adpcm #(
             if ($past(!ch_write_en_r)) begin
                 // ..the ready flag should be clear
                 assert(!ch_write_ready);
+            end
+
+            // If a status read was just requested..
+            if ($past(status_read_request) && $past(!status_read_request, 2) && $past(!status_read_request, 3)) begin
+                // ..the ready flag should be 0 as it needs to be delayed 2 cycles
+                assert(!status_read_ready);
+            end
+
+            // If a status read was previously requested..
+            if ($past(status_read_request, 2) && $past(!status_read_request, 3) && $past(!status_read_request, 4)) begin
+                // ..the ready flag should now be set
+                assert(status_read_ready);
             end
 
             // If...

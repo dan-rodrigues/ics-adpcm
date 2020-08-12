@@ -37,6 +37,8 @@ module ics_adpcm #(
     // Status register reading
 
     input [0:0] status_read_address,
+    input status_read_request,
+    output reg status_read_ready,
     output reg [CHANNEL_MSB:0] status_read_data,
 
     // Audio flags
@@ -209,8 +211,20 @@ module ics_adpcm #(
 
     reg [0:0] status_read_address_r;
 
+    reg status_read_request_r;
+    wire status_read_request_rose = !status_read_request_r && status_read_request;
+    reg status_read_ready_d;
+
     always @(posedge clk) begin
         status_read_address_r <= status_read_address;
+        status_read_request_r <= status_read_request;
+    end
+
+    // Delay status_read_ready by 2 cycles
+    
+    always @(posedge clk) begin
+        status_read_ready_d <= status_read_request_rose;
+        status_read_ready <= status_read_ready_d;
     end
 
     always @(posedge clk) begin

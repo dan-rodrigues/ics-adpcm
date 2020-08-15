@@ -32,18 +32,18 @@ module ics_adpcm #(
     input [0:0] gb_write_address,
     input [CHANNEL_MSB:0] gb_write_data,
     input gb_write_en,
+    output reg gb_write_busy,
     output reg gb_write_ready,
 
     // Status register reading
 
-    input [0:0] status_read_address,
+    input [1:0] status_read_address,
     input status_read_request,
     output reg status_read_ready,
     output reg [CHANNEL_MSB:0] status_read_data,
 
     // Audio flags
 
-    output reg gb_write_busy,
     output reg [CHANNEL_MSB:0] gb_ended,
     output reg [CHANNEL_MSB:0] gb_playing,
 
@@ -209,7 +209,7 @@ module ics_adpcm #(
 
     // Reads:
 
-    reg [0:0] status_read_address_r;
+    reg [1:0] status_read_address_r;
 
     reg status_read_request_r;
     wire status_read_request_rose = !status_read_request_r && status_read_request;
@@ -227,9 +227,18 @@ module ics_adpcm #(
         status_read_ready <= status_read_ready_d;
     end
 
+    // Status read addresses:
+    // - 0:   gb_playing
+    // - 1:   gb_ended
+    // - 2/3: gb_write_busy on bit0, rest undefined
+
     always @(posedge clk) begin
-        status_read_data[CHANNEL_MSB:1] <= gb_ended[CHANNEL_MSB:1];
-        status_read_data[0] <= status_read_address_r[0] ? gb_write_busy : gb_ended[0];
+        status_read_data <= status_read_address_r[0] ? gb_ended : gb_playing;
+
+        // Only add extra mux on bit0
+        if (status_read_address_r[1]) begin
+            status_read_data[0] <= gb_write_busy;
+        end
     end
 
     // Channel trigger shift register copy for FSM

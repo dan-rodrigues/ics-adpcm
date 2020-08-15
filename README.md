@@ -72,7 +72,7 @@ The start address for each channel is `(channel_id * 8 + offset)`.
 | 2 | `END`| 14 | PCM memory end address. This isn't inclusive so the block this points to isn't played, so this should be set to address of (final block + 1). Playback stops unless `FLAGS[0]` is set to enable automatic looping.
 | 3 | `LOOP` | 14 | PCM memory loop address. If `FLAGS[0]` is set and `END` is reached, playback restarts from this address. This value must be `>= START && < END`.
 | 4 | `VOLUMES` | 16 | 8bit signed volumes. High 8bits is R, low 8bits is L.
-| 5 | `PITCH` | 16 | Playback rate. Q4.12 fixed point value, so `0x1000` is a playback rate of 1.0. If the output rate is 44.1KHz, `PITCH = 0x800` would play the sample at (44.1KHz / 2 = 22.05KHz).
+| 5 | `PITCH` | 16 | Playback rate. Q4.12 fixed point value, so `0x1000` is a playback rate of 1.0. If the output rate is 44.1KHz, `PITCH = (0x1000 * 0.5) = 0x800` would play the sample at (44.1KHz * 0.5 = 22.05KHz).
 
 ### Global registers
 
@@ -91,15 +91,16 @@ Channels are started and stopped using a separate interface using ports prefixed
 
 | Offset | Name | Description
 | ------ | ---- | -----------
-| 0 | `ENDED` | Channels with a corresponding bit set have ended playback. The bit remains set until playback is started again.
-| 1 | `BUSY` | `BUSY[0]` outputs the value of `gb_write_busy`. All other bits are undefined.
+| 0 | `PLAYING` | Channels with a corresponding bit are currently playing.
+| 1 | `ENDED` | Channels with a corresponding bit set have ended playback. The bit remains set until playback is started again.
+| 2 | `BUSY` | `BUSY[0]` outputs the value of `gb_write_busy`. All other bits are undefined.
 
 ### Other flags
 
 These may be useful if the module is driven by an FSM rather than a CPU:
 
+* `gb_playing` outputs the value of `PLAYING`.
 * `gb_ended` outputs the value of `ENDED`.
-* `gb_playing` outputs a mask of all currently playing channels.
 
 ### Audio output
 

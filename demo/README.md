@@ -31,6 +31,13 @@ These buttons marked on the board are used for control:
 
 Output is currently sent to the headphone jack. It's pretty noisy so in the future SPDIF / HDMI output may be added for cleaner output. The `VOLUME` parameter can be used to reduce volume if needed.
 
+## Output
+
+Output is sent to the headphone jack in both analog / digital form (SPDIF).
+
+* Headphones can be plugged in directly to hear the analog output but it's a bit noisy. Output volume can be set at build time using the `VOLUME` parameter.
+* SPDIF receiver can be used to hear the digital output. Using a 3.5mm-to-RCA cable will output SPDIF audio using what would be the composite video cable. This can be plugged directly into the coaxial input of the receiver.
+
 ## TODO
 
 * Add iCEBreaker target. This can serve as a use case for streaming large audio tracks from flash rather than block RAM.

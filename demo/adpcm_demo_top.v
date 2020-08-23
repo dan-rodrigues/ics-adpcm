@@ -14,7 +14,8 @@
 `include "notes.vh"
 
 module adpcm_demo_top #(
-    parameter [7:0] VOLUME = 8'h10
+    parameter integer CLK_FREQ = 50000000,
+    parameter signed [7:0] VOLUME = 8'h10
 ) (
     input clk_25mhz,
 
@@ -23,7 +24,8 @@ module adpcm_demo_top #(
     output [7:0] led,
 
     output [3:0] audio_l,
-    output [3:0] audio_r
+    output [3:0] audio_r,
+    output [3:0] audio_v
 );
     // --- PLL (50MHz) ---
 
@@ -60,6 +62,8 @@ module adpcm_demo_top #(
         end
     end
 
+    // Analog:
+
     dacpwm #(
         .C_pcm_bits(16),
         .C_dac_bits(4)
@@ -68,6 +72,25 @@ module adpcm_demo_top #(
 
         .pcm({output_l_valid, output_r_valid}),
         .dac({audio_l, audio_r})
+    );
+
+    // SPDIF:
+
+    wire [15:0] spdif_selected_sample = spdif_channel_select ? output_r_valid : output_l_valid;
+    wire [23:0] spdif_pcm_in = {spdif_selected_sample, 8'b0};
+
+    wire spdif;
+    wire spdif_channel_select;
+    assign audio_v = {2'b00, spdif, 1'b0};
+
+    spdif_tx #(
+      .C_clk_freq(CLK_FREQ),
+      .C_sample_freq(44100)
+    ) spdif_tx (
+      .clk(clk),
+      .data_in(spdif_pcm_in),
+      .address_out(spdif_channel_select),
+      .spdif_out(spdif)
     );
 
     // --- Pitch adjustment ---
@@ -237,7 +260,7 @@ module adpcm_demo_top #(
                 ch_write_en <= 1;
             end
                 
-            if (host_ready) begin
+            if (ch_write_ready) begin
                 reg_index <= reg_index + 1;
                 ch_write_en <= 0;
             end
@@ -455,18 +478,18 @@ module adpcm_demo_top #(
     wire pcm_address_valid;
     wire [23:0] pcm_read_address;
 
-    wire host_ready;
+    wire ch_write_ready;
     wire gb_write_busy;
     wire gb_write_ready;
 
     ics_adpcm #(
-        .OUTPUT_INTERVAL(50000000 / 44100),
+        .OUTPUT_INTERVAL(CLK_FREQ / 44100),
         .CHANNELS(3)
     ) adpcm (
         .clk(clk),
         .reset(reset),
 
-        .ch_write_ready(host_ready),
+        .ch_write_ready(ch_write_ready),
 
         .ch_write_address(ch_write_address),
         .ch_write_data(ch_write_data),

@@ -13,7 +13,14 @@ TOP = adpcm_demo_top
 ULX3S_PIN_DEF = ulx3s_v20.lpf
 
 SAMPLES := samples/piano.hex samples/square.hex samples/steel_drum.hex
-SOURCES := ../ics_adpcm.v $(TOP).v pll.v dacpwm.v debouncer.v pitch_adjuster.v tracker.v
+SOURCES := ../ics_adpcm.v \
+	$(TOP).v \
+	pll.v \
+	dacpwm.v \
+	debouncer.v \
+	pitch_adjuster.v \
+	tracker.v \
+	spdif_tx.v \
 
 ### Supported board targets:
 

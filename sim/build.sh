@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
 verilator -cc ../ics_adpcm.v \
 	-GADPCM_STEP_LUT_PATH=\"../adpcm_step_lut.hex\" \

@@ -1,0 +1,27 @@
+name: verilator-tests
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-18.04
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          lfs: true
+
+      - name: Install Verilator
+        run: |
+          wget https://github.com/sifive/verilator/releases/download/4.036-0sifive2/verilator_4.036-0sifive2_amd64.deb
+          sudo dpkg -i verilator_4.036-0sifive2_amd64.deb
+          rm -f verilator_4.036-0sifive2_amd64.deb
+
+      - name: Print Verilator version
+        run: verilator --version
+
+      - name: Run tests using Verilator
+        run: |
+          cd sim
+          ./run.sh
+      

@@ -1,3 +1,5 @@
+[![verilator-tests action status](https://github.com/dan-rodrigues/ics-adpcm/workflows/verilator-tests/badge.svg)](https://github.com/dan-rodrigues/ics-adpcm/actions)
+
 # ics-adpcm
 
 This is a programmable IMA-ADPCM decoder / mixer. It can be configured with up to 16 ADPCM channels (or "voices") with independent volumes and playback rates. Sample data is loaded from a shared 16MByte address space. The output mix is signed 16bit stereo PCM.

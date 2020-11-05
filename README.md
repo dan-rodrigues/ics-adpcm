@@ -1,4 +1,5 @@
 [![verilator-tests action status](https://github.com/dan-rodrigues/ics-adpcm/workflows/verilator-tests/badge.svg)](https://github.com/dan-rodrigues/ics-adpcm/actions)
+[![symbiyosys-tests action status](https://github.com/dan-rodrigues/ics-adpcm/workflows/symbiyosys-tests/badge.svg)](https://github.com/dan-rodrigues/ics-adpcm/actions)
 
 # ics-adpcm
 

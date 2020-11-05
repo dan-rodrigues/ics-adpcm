@@ -1,0 +1,25 @@
+name: symbiyosys-tests
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-18.04
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          lfs: true
+
+      - name: Install SymbiYosys
+        run: |
+          wget https://github.com/open-tool-forge/fpga-toolchain/releases/download/nightly-20201104/fpga-toolchain-linux_x86_64-nightly-20201104.tar.xz
+          tar -xf fpga-toolchain-linux_x86_64-nightly-20201104.tar.xz
+          rm fpga-toolchain-linux_x86_64-nightly-20201104.tar.xz
+          echo "$(pwd)/fpga-toolchain/bin" >> $GITHUB_PATH
+
+      - name: Run tests using SymbiYosys
+        run: |
+          cd formal
+          ./run.sh
+      

@@ -21,10 +21,14 @@ SOURCES := ../ics_adpcm.v \
 	pitch_adjuster.v \
 	tracker.v \
 	spdif_tx.v \
+	spi_midi_control.v \
+	midi_encoder.v \
+	midi_decoder.v \
+	midi_status_input_buffer.v \
 
 ### Supported board targets:
 
-ulx3s: ulx3s.svf
+ulx3s: ulx3s.bit
 
 .PHONY: ulx3s
 
@@ -45,19 +49,22 @@ YOSYS_DEFINE_ARGS := -f 'verilog -DADPCM_STEP_LUT_PATH="../adpcm_step_lut.hex"'
 	$(call synth, -json $@)
 
 clean:
-	rm -f $(ULX3S_PREFIX).config $(ULX3S_PREFIX).svf $(ULX3S_PREFIX).json
+	rm -f $(ULX3S_PREFIX).config $(ULX3S_PREFIX).bit $(ULX3S_PREFIX).json
 
 ### ECP5:
 
 %.config: $(ULX3S_PIN_DEF) %.json
 	nextpnr-ecp5 --package $(ECP5_PACKAGE) --$(ECP5_SIZE)k --json $(filter-out $<,$^) --placer heap --lpf $< --textcfg $@ --seed 0
 
-%.svf: %.config
-	ecppack --input $< --svf $@
+%.bit: %.config
+	ecppack --input $< --bit $@
 
-ulx3s_prog: $(ULX3S_PREFIX).svf
+ulx3s_prog: $(ULX3S_PREFIX).bit
 	fujprog $<
 
+ulx3s_flash: $(ULX3S_PREFIX).bit
+	fujprog -j flash $<
+
 .SECONDARY:
-.PHONY: ulx3s_prog clean
+.PHONY: ulx3s_prog ulx3s_flash clean
 

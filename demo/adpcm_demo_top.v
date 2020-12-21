@@ -19,14 +19,135 @@ module adpcm_demo_top #(
 ) (
     input clk_25mhz,
 
+    input ftdi_txd,
+    output ftdi_rxd,
+
     input [6:0] btn,
 
     output [7:0] led,
 
     output [3:0] audio_l,
     output [3:0] audio_r,
-    output [3:0] audio_v
+    output [3:0] audio_v,
+
+    // ESP32 ("sd_d" pins in .lpf were renamed to their "wifi_gpio" equivalent)
+
+    output wifi_en,
+
+    input wifi_gpio5,
+    input wifi_gpio16,
+    input wifi_gpio2,
+    input wifi_gpio4,
+
+    output wifi_gpio12,
+    output wifi_gpio13,
+
+    input  wifi_txd,
+    output wifi_rxd
 );
+    // --- MIDI control over bluetooth ---
+
+    localparam [3:0] MIDI_CHANNELS = 3;
+
+    assign wifi_en = 1;
+
+    // UART for console:
+
+    assign wifi_rxd = ftdi_txd;
+    assign ftdi_rxd = wifi_txd;
+
+    reg [3:0] esp_sync_ff [0:1];
+
+    // ESP32 inputs:
+
+    wire esp_write_en = esp_sync_ff[1][3];
+    wire esp_spi_mosi = esp_sync_ff[1][2];
+    wire esp_spi_clk = esp_sync_ff[1][1];
+    wire esp_spi_csn = esp_sync_ff[1][0];
+
+    always @(posedge clk) begin
+        esp_sync_ff[1] <= esp_sync_ff[0];
+        esp_sync_ff[0] <= {wifi_gpio2, wifi_gpio4, wifi_gpio16, wifi_gpio5};
+    end
+
+    // ESP32 outputs:
+
+    assign wifi_gpio12 = esp_spi_miso;
+    assign wifi_gpio13 = esp_read_needed;
+
+    wire esp_spi_miso;
+    wire esp_read_needed;
+
+    // MIDI outputs:
+
+    wire [MIDI_CHANNELS - 1:0] midi_key_on;
+    wire [MIDI_CHANNELS - 1:0] midi_key_off;
+    wire [3:0] midi_note;
+    wire [1:0] midi_octave;
+
+    assign led[7:4] = midi_key_on;
+
+    reg [MIDI_CHANNELS - 1:0] status_note_off, status_note_off_r;
+
+    always @(posedge clk) begin
+        if (reset) begin
+            status_note_off <= 0;
+            status_note_off_r <= 0;
+        end else begin
+            status_note_off <= 0;
+
+            if (status_note_off_r != channels_to_stop) begin
+                status_note_off_r <= channels_to_stop;
+                status_note_off <= channels_to_stop;
+            end
+        end
+    end
+
+    // MIDI priority over other inputs (if inputs are pending):
+
+    reg [MIDI_CHANNELS - 1:0] midi_pending_key_on;
+
+    always @(posedge clk) begin
+        if (reset) begin
+            midi_pending_key_on <= 0;
+        end else begin 
+            midi_pending_key_on <= (midi_pending_key_on | midi_key_on) & ~channels_pending_start;
+        end
+    end
+
+    spi_midi_control #(
+        .CHANNELS(MIDI_CHANNELS)
+    ) midi_control (
+        .clk(clk),
+        .reset(reset),
+
+        // ESP32
+
+        .spi_csn(esp_spi_csn),
+        .spi_clk(esp_spi_clk),
+        .spi_mosi(esp_spi_mosi),
+        .spi_miso(esp_spi_miso),
+        .spi_write_en(esp_write_en),
+
+        .read_needed(esp_read_needed),
+
+        // Status input
+
+        .status_note_on(channel_writing_started),
+        .status_note(target_note),
+        .status_octave(target_octave),
+        .status_channel(channel_being_configured),
+
+        .status_note_off(status_note_off),
+
+        // Control output
+
+        .key_on(midi_key_on),
+        .key_off(midi_key_off),
+        .note(midi_note),
+        .octave(midi_octave)
+    );
+
     // --- PLL (50MHz) ---
 
     wire pll_locked;
@@ -98,13 +219,13 @@ module adpcm_demo_top #(
     wire [15:0] adjusted_pitch;
     wire adjusted_pitch_valid;
 
-    reg [1:0] octave;
+    reg [1:0] user_octave;
 
     always @(posedge clk) begin
         if (reset) begin
-            octave <= 0;
+            user_octave <= 0;
         end else if (trigger[0]) begin
-            octave <= octave + 1;
+            user_octave <= user_octave + 1;
         end
     end
 
@@ -152,8 +273,8 @@ module adpcm_demo_top #(
 
     wire tracker_finished; 
     wire tracker_playing;
-    wire [3:0] tracker_note_1, tracker_note_2;
-    wire [1:0] tracker_octave_1, tracker_octave_2;
+    wire [2 * 4 - 1:0] tracker_notes;
+    wire [2 * 2 - 1:0] tracker_octaves;
 
     wire [1:0] tracker_key_on, tracker_key_off;
 
@@ -180,10 +301,10 @@ module adpcm_demo_top #(
         .finished(tracker_finished),
         .playing(tracker_playing),
 
-        .note_1(tracker_note_1),
-        .note_2(tracker_note_2),
-        .octave_1(tracker_octave_1),
-        .octave_2(tracker_octave_2),
+        .note_1(tracker_notes[3:0]),
+        .note_2(tracker_notes[7:4]),
+        .octave_1(tracker_octaves[1:0]),
+        .octave_2(tracker_octaves[3:2]),
 
         .key_on(tracker_key_on),
         .key_off(tracker_key_off),
@@ -193,41 +314,92 @@ module adpcm_demo_top #(
 
     // --- Channel start / stop control ---
 
+    localparam [0:0] FORCE_MIDI_CONTROL = 0;
+
+    localparam [1:0]
+        CONFIG_SOURCE_MIDI = 0,
+        CONFIG_SOURCE_BUTTON = 1,
+        CONFIG_SOURCE_TRACKER = 2;
+
+    reg [1:0] config_source;
+
+    wire midi_keys_pending = |(
+        midi_key_on | midi_pending_key_on |
+        midi_key_off
+    );
+
+    always @* begin
+        if (FORCE_MIDI_CONTROL || midi_keys_pending) begin
+            config_source = CONFIG_SOURCE_MIDI;
+        end else if (tracker_playing) begin
+            config_source = CONFIG_SOURCE_TRACKER;
+        end else begin
+            config_source = CONFIG_SOURCE_BUTTON;
+        end
+    end
+
     wire [2:0] user_pending_start = {trigger[6], trigger[4], trigger[5]};
     wire [2:0] user_pending_stop = {released[6], released[4], released[5]};
 
     wire [2:0] tracker_pending_start = {1'b0, tracker_key_on};
     wire [2:0] tracker_pending_stop = {1'b0, tracker_key_off};
 
-    wire [2:0] pending_start = !tracker_playing ? user_pending_start : tracker_pending_start;
-    wire [2:0] pending_stop = !tracker_playing ? user_pending_stop : tracker_pending_stop;
+    reg [2:0] pending_start;
+    reg [2:0] pending_stop;
+
+    always @* begin
+        case (config_source)
+            CONFIG_SOURCE_MIDI: begin
+                pending_start = midi_key_on;
+                pending_stop = midi_key_off;
+            end
+            CONFIG_SOURCE_TRACKER: begin
+                pending_start = tracker_pending_start;
+                pending_stop = tracker_pending_stop;
+            end
+            CONFIG_SOURCE_BUTTON: begin
+                pending_start = user_pending_start;
+                pending_stop = user_pending_stop;
+            end
+        endcase
+    end
 
     // --- Channel control ---
 
     // Note selection:
 
     reg [3:0] target_note;
-    reg [1:0] target_octave;
+
+    wire [4 * 3 - 1:0] button_notes = {`NOTE_G, `NOTE_E, `NOTE_C};
 
     always @* begin
-        case (channel_being_configured)
-            0: target_note = !tracker_playing ? `NOTE_C : tracker_note_1;
-            1: target_note = !tracker_playing ? `NOTE_E : tracker_note_2;
-            2: target_note = `NOTE_G;
-            default: target_note = `NOTE_A;
+        case (config_source)
+            CONFIG_SOURCE_MIDI:
+                target_note = midi_note;
+            CONFIG_SOURCE_TRACKER:
+                target_note = tracker_notes[channel_being_configured * 4+:4];
+            CONFIG_SOURCE_BUTTON:
+                target_note = button_notes[channel_being_configured * 4+:4];
+            default:
+                target_note = `NOTE_G;
         endcase
     end
 
+    // Octave selection:
+
+    reg [1:0] target_octave;
+
     always @* begin
-        if (!tracker_playing) begin
-            target_octave = octave;
-        end else begin
-            case (channel_being_configured)
-                0: target_octave = tracker_octave_1;
-                1: target_octave = tracker_octave_2;
-                default: target_octave = 0;
-            endcase
-        end
+        case (config_source)
+            CONFIG_SOURCE_MIDI:
+                target_octave = midi_octave;
+            CONFIG_SOURCE_TRACKER:
+                target_octave = tracker_octaves[channel_being_configured * 2+:2];
+            CONFIG_SOURCE_BUTTON:
+                target_octave = user_octave;
+            default:
+                target_octave = 0;
+        endcase
     end
 
     // Channel configuration (channel registers):
@@ -238,6 +410,7 @@ module adpcm_demo_top #(
     reg ch_write_en;
     reg [2:0] reg_index;
     reg channel_writing;
+    reg channel_writing_started;
 
     reg pitch_needs_adjusting;
 
@@ -254,8 +427,11 @@ module adpcm_demo_top #(
         if (reset) begin
             channels_pending_config <= 0;
             channel_writing <= 0;
+            channel_writing_started <= 0;
             ch_write_en <= 0;
         end else if (channel_writing) begin
+            channel_writing_started <= 0;
+
             if (adjusted_pitch_valid) begin
                 ch_write_en <= 1;
             end
@@ -279,6 +455,7 @@ module adpcm_demo_top #(
 
             reg_index <= 0;
             channel_writing <= 1;
+            channel_writing_started <= 1;
             pitch_needs_adjusting <= 1;
 
             ch_write_en <= 0;
@@ -292,13 +469,16 @@ module adpcm_demo_top #(
     reg [2:0] gb_write_data;
 
     reg [2:0] channels_to_start, channels_to_stop;
+    reg [2:0] channels_stopped;
 
     always @(posedge clk) begin
         channels_to_start <= channels_to_start | channels_pending_start;
         channels_to_stop <= channels_to_stop | pending_stop;
+        channels_stopped <= 0;
 
         if (reset) begin
             gb_write_en <= 0;
+            channels_stopped <= 0;
         end else if (|channels_to_start && !gb_write_busy) begin
             gb_write_data <= channels_to_start;
             gb_write_address <= 1'h00;
@@ -310,6 +490,7 @@ module adpcm_demo_top #(
             gb_write_address <= 1'h01;
             gb_write_en <= 1;
 
+            channels_stopped <= channels_to_stop;
             channels_to_stop <= 0;
         end
 
@@ -465,10 +646,6 @@ module adpcm_demo_top #(
         $readmemh("samples/steel_drum.hex", pcm_ram, STEEL_DRUM_BLOCK_START * 512);
         $readmemh("samples/square.hex", pcm_ram, SQUARE_BLOCK_START * 512);
     end
-
-    // Unassigned LEDs:
-
-    assign led[7:4] = 0;
 
     // --- ADPCM ---
 

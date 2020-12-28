@@ -9,7 +9,8 @@
 `include "notes.vh"
 
 module spi_midi_control #(
-    parameter [3:0] CHANNELS = 3
+    parameter [3:0] CHANNELS = 3,
+    parameter [6:0] MIDI_NOTE_BASE = 7'h3c
 ) (
     input clk,
     input reset,
@@ -119,7 +120,8 @@ module spi_midi_control #(
     wire midi_output_valid;
 
     midi_decoder #(
-        .CHANNELS(CHANNELS)
+        .CHANNELS(CHANNELS),
+        .MIDI_NOTE_BASE(MIDI_NOTE_BASE)
     ) midi_decoder (
         .clk(clk),
         .reset(reset),
@@ -173,7 +175,8 @@ module spi_midi_control #(
     wire midi_status_valid;
 
     midi_encoder #(
-        .CHANNELS(CHANNELS)
+        .CHANNELS(CHANNELS),
+        .MIDI_NOTE_BASE(MIDI_NOTE_BASE)
     ) midi_encoder (
         .clk(clk),
         .reset(reset),

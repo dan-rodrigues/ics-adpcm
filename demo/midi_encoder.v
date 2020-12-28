@@ -6,7 +6,8 @@
 
 module midi_encoder #(
     parameter [3:0] CHANNELS = 3,
-    parameter [6:0] MIDI_NOTE_BASE = 7'h00
+    parameter [6:0] MIDI_NOTE_BASE = 7'h00,
+    parameter [6:0] MIDI_VELOCITY = 7'h40
 ) (
     input clk,
     input reset,
@@ -50,7 +51,7 @@ module midi_encoder #(
     };
 
     wire [7:0] midi_note = octave_r * 12 + note_r + MIDI_NOTE_BASE;
-    wire [7:0] midi_velocity = 8'h7f;
+    wire [7:0] midi_velocity = {1'b0, MIDI_VELOCITY};
 
     wire [23:0] midi_encoded = {
         midi_velocity, midi_note, midi_status
